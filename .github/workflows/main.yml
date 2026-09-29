@@ -27,9 +27,9 @@ jobs:
           distribution: 'temurin'
           java-version: '17'
 
-      - name: Build Android Debug APK with Gradle
+      - name: Sync Capacitor and Build Android Debug APK
         run: |
-          npx cap update android
+          npx cap sync android
           cd android
           chmod +x gradlew
           ./gradlew assembleDebug
