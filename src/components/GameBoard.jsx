@@ -25,6 +25,7 @@ export default function GameBoard({
   toggleHold,
   rollDice,
   upperSubtotal,
+  onOpenStats,
 }) {
   const renderCellContent = (item) => {
     const isP1Scored = playerScores[item.id] !== undefined;
@@ -38,6 +39,9 @@ export default function GameBoard({
         playerScores={playerScores}
         opponentScores={opponentScores}
         turn={turn}
+        rollsLeft={rollsLeft}
+        p2RollsLeft={p2RollsLeft}
+        gameMode={gameMode}
         playerDice={playerDice}
         p2Dice={p2Dice}
         canScoreP1={canScoreP1}
@@ -48,22 +52,38 @@ export default function GameBoard({
     );
   };
 
+  // Defensive: consider match complete when both score objects are full
+  const playerCount = Object.keys(playerScores).length;
+  const opponentCount = Object.keys(opponentScores).length;
+  const matchComplete = playerCount === 13 && opponentCount === 13;
+
   return (
-    <div className="flex-1 flex flex-col justify-between p-4 sm:p-5 overflow-hidden">
-      <div className="flex justify-between items-center bg-emerald-950/70 px-3.5 py-2 rounded-2xl border border-emerald-700/40 shadow-inner">
-        <button
-          onClick={resetGame}
-          className="px-2.5 py-1 bg-emerald-900 hover:bg-emerald-800 text-amber-300 rounded-xl text-xs font-black border border-emerald-600/40 transition-all"
-        >
-          🏠 MENU
-        </button>
+    <div className="flex-1 flex flex-col justify-between p-3 sm:p-4 overflow-hidden relative">
+      
+      {/* Top Header / Status Bar */}
+      <div className="flex justify-between items-center bg-emerald-950/70 px-3.5 py-2 rounded-2xl border border-emerald-700/40 shadow-inner mb-2">
+        <div className="flex items-center gap-1.5">
+          <button
+            onClick={resetGame}
+            className="px-2.5 py-1 bg-emerald-900 hover:bg-emerald-800 text-amber-300 rounded-xl text-xs font-black border border-emerald-600/40 transition-all"
+          >
+            🏠 MENU
+          </button>
+          <button
+            onClick={onOpenStats}
+            className="p-1.5 bg-emerald-900 hover:bg-emerald-800 text-amber-300 rounded-xl text-xs border border-emerald-600/40 transition-all shadow flex items-center justify-center"
+            title="Performance Stats & Settings"
+          >
+            ⚙️
+          </button>
+        </div>
 
         <div className="text-center">
           <span className="text-[9px] text-emerald-400 block uppercase tracking-wider font-bold">
             {gameMode === 'ai' ? 'VS AI BOT' : 'PASS & PLAY'}
           </span>
           <span className="text-xs font-black text-amber-300">
-            {turn === 'player' ? "Player 1's Turn" : (gameMode === 'ai' ? 'AI Turn' : "Player 2's Turn")}
+            {turn === 'player' ? "Your Turn" : (gameMode === 'ai' ? "AI's Turn" : "Player 2's Turn")}
           </span>
         </div>
 
@@ -75,7 +95,33 @@ export default function GameBoard({
         </div>
       </div>
 
-      <div className="grid grid-cols-2 gap-2 my-2 overflow-y-auto pr-1">
+      {/* Opponent / AI Dice Section */}
+      <div className="mb-2 p-2.5 rounded-2xl border border-emerald-700/40 bg-rose-950/20">
+        <div className="flex justify-between items-center mb-1.5 px-1">
+          <span className="text-[10px] font-bold text-rose-300">
+            {gameMode === 'ai' ? 'AI Bot' : "Player 2"} ({gameMode === 'ai' ? p2Message : `Rolls: ${p2RollsLeft}/3`})
+          </span>
+          <span className="text-[10px] font-black text-rose-400">
+            {turn === 'opponent' ? 'Playing...' : 'Waiting'}
+          </span>
+        </div>
+
+        <div id="p2-tray-container" className="flex justify-center gap-2">
+          {p2Dice.map((val, idx) => (
+            <Die
+              key={idx}
+              value={val}
+              held={p2Held ? p2Held[idx] : false}
+              disabled={true}
+              isRolling={isP2Rolling}
+              isP2={true}
+            />
+          ))}
+        </div>
+      </div>
+
+      {/* Scoreboard Grid */}
+      <div className="grid grid-cols-2 gap-1.5 my-1 overflow-y-auto pr-1 flex-1">
         {COLUMN_PAIRS.map((pair, idx) => (
           <React.Fragment key={idx}>
             <div>{renderCellContent(pair.left)}</div>
@@ -84,85 +130,46 @@ export default function GameBoard({
         ))}
       </div>
 
-      <div className="mt-auto pt-2 border-t border-emerald-800/40">
-        <div className="flex justify-between items-center mb-2 px-1">
+      {/* Player Dice & Action Section */}
+      <div className="mt-2 pt-2 border-t border-emerald-800/40">
+        <div className="flex justify-between items-center mb-1.5 px-1">
           <span className="text-[10px] font-bold text-emerald-300">
-            {turn === 'player' ? `Rolls left: ${rollsLeft}/3` : (gameMode === 'ai' ? p2Message : `P2 Rolls: ${p2RollsLeft}/3`)}
+            Rolls left: {rollsLeft}/3
           </span>
           <span className="text-[10px] font-black text-amber-300">
-            {turn === 'player' ? 'Your Turn' : (gameMode === 'ai' ? 'AI Thinking...' : "Player 2's Turn")}
+            {turn === 'player' ? 'Your Turn' : 'Wait for your turn'}
           </span>
         </div>
 
-        {turn === 'player' ? (
-          <div id="player-tray-container" className="bg-emerald-950/80 p-3.5 rounded-2xl border border-emerald-700/50 shadow-lg flex flex-col gap-2.5">
-            <div className="flex justify-center gap-3">
-              {playerDice.map((val, idx) => (
-                <Die
-                  key={idx}
-                  value={val}
-                  held={held[idx]}
-                  disabled={rollsLeft === 3 || gameOver || isRolling}
-                  isRolling={isRolling}
-                  onClick={() => toggleHold(idx)}
-                />
-              ))}
-            </div>
+        <div id="player-tray-container" className="bg-emerald-950/80 p-3 rounded-2xl border border-emerald-700/50 shadow-lg flex flex-col gap-2">
+          <div className="flex justify-center gap-3">
+            {playerDice.map((val, idx) => (
+              <Die
+                key={idx}
+                value={val}
+                held={held[idx]}
+                disabled={rollsLeft === 3 || gameOver || isRolling || turn !== 'player' || matchComplete}
+                isRolling={isRolling}
+                onClick={() => toggleHold(idx)}
+              />
+            ))}
+          </div>
 
-            <button
-              disabled={rollsLeft <= 0 || gameOver || isRolling}
-              onClick={rollDice}
-              className={`w-full py-2.5 rounded-xl font-black text-xs tracking-wider uppercase transition-all shadow-md ${
-                rollsLeft > 0 && !gameOver && !isRolling
-                  ? 'bg-gradient-to-r from-amber-400 to-amber-500 hover:from-amber-300 hover:to-amber-400 text-emerald-950 border border-amber-200'
-                  : 'bg-emerald-900/50 text-emerald-500/60 border border-emerald-800/40 cursor-not-allowed'
-              }`}
-            >
-              {rollsLeft === 3 ? 'Roll Dice' : rollsLeft > 0 ? `Re-Roll Dice (${rollsLeft} left)` : 'Select a Score'}
-            </button>
-          </div>
-        ) : gameMode === 'friend' ? (
-          <div id="p2-tray-container" className="bg-violet-950/80 p-3.5 rounded-2xl border border-violet-700/50 shadow-lg flex flex-col gap-2.5">
-            <div className="flex justify-center gap-3">
-              {p2Dice.map((val, idx) => (
-                <Die
-                  key={idx}
-                  value={val}
-                  held={p2Held[idx]}
-                  disabled={p2RollsLeft === 3 || gameOver || isP2Rolling}
-                  isRolling={isP2Rolling}
-                  isP2={true}
-                  onClick={() => toggleHold(idx)}
-                />
-              ))}
-            </div>
-
-            <button
-              disabled={p2RollsLeft <= 0 || gameOver || isP2Rolling}
-              onClick={rollDice}
-              className={`w-full py-2.5 rounded-xl font-black text-xs tracking-wider uppercase transition-all shadow-md ${
-                p2RollsLeft > 0 && !gameOver && !isP2Rolling
-                  ? 'bg-gradient-to-r from-violet-400 to-violet-500 hover:from-violet-300 hover:to-violet-400 text-violet-950 border border-violet-200'
-                  : 'bg-violet-900/50 text-violet-400/60 border border-violet-800/40 cursor-not-allowed'
-              }`}
-            >
-              {p2RollsLeft === 3 ? "Player 2 Roll" : p2RollsLeft > 0 ? `P2 Re-Roll (${p2RollsLeft} left)` : 'Select P2 Score'}
-            </button>
-          </div>
-        ) : (
-          <div id="p2-tray-container" className="bg-emerald-950/80 p-3.5 rounded-2xl border border-rose-900/40 shadow-lg text-center py-4">
-            <div className="text-xs font-black text-rose-300 animate-pulse">{p2Message}</div>
-            <div className="flex justify-center gap-3 mt-2">
-              {p2Dice.map((val, idx) => (
-                <div key={idx} className="w-9 h-9 sm:w-10 sm:h-10 rounded-xl bg-rose-950/60 border border-rose-500/30 flex items-center justify-center text-rose-200 font-black text-base">
-                  {val}
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
+          <button
+            disabled={rollsLeft <= 0 || gameOver || isRolling || turn !== 'player' || matchComplete}
+            onClick={rollDice}
+            className={`w-full py-2 rounded-xl font-black text-xs tracking-wider uppercase transition-all shadow-md ${
+              rollsLeft > 0 && !gameOver && !isRolling && turn === 'player'
+                ? 'bg-gradient-to-r from-amber-400 to-amber-500 hover:from-amber-300 hover:to-amber-400 text-emerald-950 border border-amber-200'
+                : 'bg-emerald-900/50 text-emerald-500/60 border border-emerald-800/40 cursor-not-allowed'
+            }`}
+          >
+            {rollsLeft === 3 ? 'Roll Dice' : rollsLeft > 0 ? `Re-Roll Dice (${rollsLeft} left)` : 'Select a Score'}
+          </button>
+        </div>
       </div>
 
+      {/* Game Over Modal */}
       {gameOver && (
         <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 animate-fadeIn">
           <div className="bg-gradient-to-b from-emerald-900 to-emerald-950 border-2 border-amber-400/60 rounded-3xl p-6 w-full max-w-xs shadow-2xl text-center text-white">

@@ -2,7 +2,7 @@ import { useMemo, useState, useEffect } from 'react';
 import GameBoard from './components/GameBoard';
 import MenuScreen from './components/MenuScreen';
 import StatsModal from './components/StatsModal';
-import ConfirmModal from './components/ConfirmModal'; // <-- ConfirmModal import kiya
+import ConfirmModal from './components/ConfirmModal';
 import { chooseBotHeldDice, getBestBotCategory } from './game/ai';
 import { clearGameState, STORAGE_KEYS } from './game/storage';
 import { sumDice, checkNOfAKind, checkFullHouse, checkSmallStraight, checkLargeStraight, checkYatzy, emptyDice, emptyHeld } from './game/logic';
@@ -34,13 +34,47 @@ export default function App() {
     return saved ? JSON.parse(saved) : {};
   });
   const [gameOver, setGameOver] = useState(() => localStorage.getItem(STORAGE_KEYS.gameOver) === 'true');
+  const [resultRecorded, setResultRecorded] = useState(() => localStorage.getItem(STORAGE_KEYS.resultRecorded) === 'true');
+  
+  // Track if bonus sound has already played using localStorage persistence
+  const [bonusPlayed, setBonusPlayed] = useState(() => {
+    return localStorage.getItem(STORAGE_KEYS.bonusPlayed) === 'true';
+  });
+
+  // Safe stats initialization with default fallbacks for all properties
   const [stats, setStats] = useState(() => {
     const saved = localStorage.getItem(STORAGE_KEYS.stats);
-    return saved ? JSON.parse(saved) : { played: 0, wins: 0, losses: 0, draws: 0 };
+    if (saved) {
+      try {
+        const parsed = JSON.parse(saved);
+        return {
+          played: parsed.played || 0,
+          wins: parsed.wins || 0,
+          losses: parsed.losses || 0,
+          draws: parsed.draws || 0,
+          highestScore: parsed.highestScore || 0,
+          totalScore: parsed.totalScore || 0,
+          currentStreak: parsed.currentStreak || 0,
+          highestStreak: parsed.highestStreak || 0,
+        };
+      } catch (e) {
+        // Fallback if JSON parse fails
+      }
+    }
+    return { 
+      played: 0, 
+      wins: 0, 
+      losses: 0, 
+      draws: 0, 
+      highestScore: 0, 
+      totalScore: 0, 
+      currentStreak: 0, 
+      highestStreak: 0 
+    };
   });
+
   const [showStatsModal, setShowStatsModal] = useState(false);
   
-  // Custom Modal state ke liye
   const [pendingMode, setPendingMode] = useState(null);
   const [showConfirmModal, setShowConfirmModal] = useState(false);
 
@@ -60,6 +94,25 @@ export default function App() {
   });
   const [isP2Rolling, setIsP2Rolling] = useState(false);
   const [p2Message, setP2Message] = useState('Waiting for turn...');
+
+  const totalCategoriesCount = 13;
+
+  // Bulletproof DOM-based Sound Helper Workaround
+  const playSound = (fileName) => {
+    try {
+      const cleanName = fileName.replace('.wav', '').trim();
+      const audioElement = document.getElementById(`sound-${cleanName}`);
+      if (audioElement) {
+        audioElement.currentTime = 0;
+        audioElement.volume = 0.6;
+        audioElement.play().catch((err) => {
+          console.log("Browser autoplay policy restricted sound:", err.message);
+        });
+      }
+    } catch (e) {
+      console.log("Audio playback error:", e);
+    }
+  };
 
   const hasSavedGame = useMemo(() => {
     const pScores = JSON.parse(localStorage.getItem(STORAGE_KEYS.playerScores) || '{}');
@@ -91,35 +144,127 @@ export default function App() {
     localStorage.setItem(STORAGE_KEYS.p2Dice, JSON.stringify(p2Dice));
     localStorage.setItem(STORAGE_KEYS.p2Held, JSON.stringify(p2Held));
     localStorage.setItem(STORAGE_KEYS.p2RollsLeft, p2RollsLeft);
-  }, [gameStarted, gameMode, playerDice, held, rollsLeft, turn, playerScores, opponentScores, gameOver, p2Dice, p2Held, p2RollsLeft]);
+    localStorage.setItem(STORAGE_KEYS.resultRecorded, resultRecorded);
+  }, [gameStarted, gameMode, playerDice, held, rollsLeft, turn, playerScores, opponentScores, gameOver, p2Dice, p2Held, p2RollsLeft, resultRecorded]);
 
   const upperSubtotal = useMemo(
     () => ['ones', 'twos', 'threes', 'fours', 'fives', 'sixes'].reduce((acc, id) => acc + (playerScores[id] || 0), 0),
     [playerScores],
   );
+  
   const bonus = upperSubtotal >= 63 ? 35 : 0;
+
+  // Check and play bonus sound when upper subtotal reaches 63+
+  useEffect(() => {
+    if (upperSubtotal >= 63 && !bonusPlayed) {
+      playSound('bonus.wav');
+      setBonusPlayed(true);
+      localStorage.setItem(STORAGE_KEYS.bonusPlayed, 'true');
+    }
+  }, [upperSubtotal, bonusPlayed]);
+
   const upperTotal = upperSubtotal + bonus;
   const lowerTotal = useMemo(
     () => ['threeOfAKind', 'fourOfAKind', 'fullHouse', 'smallStraight', 'largeStraight', 'yatzy', 'chance'].reduce((acc, id) => acc + (playerScores[id] || 0), 0),
     [playerScores],
   );
   const grandTotal = upperTotal + lowerTotal;
-  const opponentTotal = useMemo(() => Object.values(opponentScores).reduce((a, b) => a + b, 0), [opponentScores]);
-  const totalCategoriesCount = 13;
+  const opponentTotal = useMemo(() => {
+    const upperIds = ['ones', 'twos', 'threes', 'fours', 'fives', 'sixes'];
+    const lowerIds = ['threeOfAKind', 'fourOfAKind', 'fullHouse', 'smallStraight', 'largeStraight', 'yatzy', 'chance'];
+    const upperSubtotalLocal = upperIds.reduce((acc, id) => acc + (opponentScores[id] || 0), 0);
+    const bonusLocal = upperSubtotalLocal >= 63 ? 35 : 0;
+    const lowerTotalLocal = lowerIds.reduce((acc, id) => acc + (opponentScores[id] || 0), 0);
+    return upperSubtotalLocal + bonusLocal + lowerTotalLocal;
+  }, [opponentScores]);
 
   const recordGameResult = (pTotal, aTotal) => {
-    if (gameMode === 'friend') return;
+    if (gameMode === 'friend' || resultRecorded) return;
+
     setStats((prev) => {
-      const nextStats = { ...prev, played: prev.played + 1 };
-      if (pTotal > aTotal) nextStats.wins += 1;
-      else if (pTotal < aTotal) nextStats.losses += 1;
-      else nextStats.draws += 1;
+      const prevPlayed = prev?.played || 0;
+      const prevTotalScore = prev?.totalScore || 0;
+      const prevHighestScore = prev?.highestScore || 0;
+      const prevWins = prev?.wins || 0;
+      const prevLosses = prev?.losses || 0;
+      const prevDraws = prev?.draws || 0;
+      const prevCurrentStreak = prev?.currentStreak || 0;
+      const prevHighestStreak = prev?.highestStreak || 0;
+
+      const nextPlayed = prevPlayed + 1;
+      const nextTotalScore = prevTotalScore + pTotal;
+      const nextHighestScore = Math.max(prevHighestScore, pTotal);
+      
+      let nextWins = prevWins;
+      let nextLosses = prevLosses;
+      let nextDraws = prevDraws;
+      let nextCurrentStreak = prevCurrentStreak;
+      let nextHighestStreak = prevHighestStreak;
+
+      if (pTotal > aTotal) {
+        nextWins += 1;
+        nextCurrentStreak += 1;
+        if (nextCurrentStreak > nextHighestStreak) {
+          nextHighestStreak = nextCurrentStreak;
+        }
+      } else if (pTotal < aTotal) {
+        nextLosses += 1;
+        nextCurrentStreak = 0;
+      } else {
+        nextDraws += 1;
+        nextCurrentStreak = 0;
+      }
+
+      const nextStats = {
+        played: nextPlayed,
+        wins: nextWins,
+        losses: nextLosses,
+        draws: nextDraws,
+        highestScore: nextHighestScore,
+        totalScore: nextTotalScore,
+        currentStreak: nextCurrentStreak,
+        highestStreak: nextHighestStreak,
+      };
+
       localStorage.setItem(STORAGE_KEYS.stats, JSON.stringify(nextStats));
       return nextStats;
     });
+
+    localStorage.setItem(STORAGE_KEYS.resultRecorded, 'true');
+    setResultRecorded(true);
   };
 
+  useEffect(() => {
+    const pCount = Object.keys(playerScores).length;
+    const oCount = Object.keys(opponentScores).length;
+    if (pCount === totalCategoriesCount && oCount === totalCategoriesCount) {
+      if (!gameOver) {
+        setGameOver(true);
+        setTurn('player');
+
+        // Play win/lose sound directly via hidden DOM audio elements
+        if (gameMode !== 'friend' && !resultRecorded) {
+          if (grandTotal > opponentTotal) {
+            playSound('win.wav');
+          } else if (grandTotal < opponentTotal) {
+            playSound('lose.wav');
+          }
+        }
+      }
+      if (!resultRecorded && gameMode !== 'friend') {
+        recordGameResult(grandTotal, opponentTotal);
+      }
+    }
+  }, [playerScores, opponentScores, gameOver, totalCategoriesCount, grandTotal, opponentTotal, gameMode, resultRecorded]);
+
   const rollDice = () => {
+    const pCount = Object.keys(playerScores).length;
+    const oCount = Object.keys(opponentScores).length;
+    if (pCount === totalCategoriesCount && oCount === totalCategoriesCount) {
+      if (!gameOver) setGameOver(true);
+      return;
+    }
+
     if (turn !== 'player' && gameMode === 'friend' && turn !== 'opponent') return;
     const currentRolls = turn === 'player' ? rollsLeft : p2RollsLeft;
     if (currentRolls <= 0 || gameOver) return;
@@ -144,6 +289,12 @@ export default function App() {
 
   const toggleHold = (idx) => {
     if (gameOver) return;
+    const pCount = Object.keys(playerScores).length;
+    const oCount = Object.keys(opponentScores).length;
+    if (pCount === totalCategoriesCount && oCount === totalCategoriesCount) {
+      if (!gameOver) setGameOver(true);
+      return;
+    }
     if (turn === 'player') {
       if (rollsLeft === 3) return;
       setHeld((current) => {
@@ -162,8 +313,23 @@ export default function App() {
   };
 
   const finalizeScore = (catId, calcFn, isP2 = false, diceValues = turn === 'player' ? playerDice : p2Dice) => {
+    const computeTotal = (scoresObj) => {
+      const upperIds = ['ones', 'twos', 'threes', 'fours', 'fives', 'sixes'];
+      const lowerIds = ['threeOfAKind', 'fourOfAKind', 'fullHouse', 'smallStraight', 'largeStraight', 'yatzy', 'chance'];
+      const upperSubtotalLocal = upperIds.reduce((acc, id) => acc + (scoresObj[id] || 0), 0);
+      const bonusLocal = upperSubtotalLocal >= 63 ? 35 : 0;
+      const lowerTotalLocal = lowerIds.reduce((acc, id) => acc + (scoresObj[id] || 0), 0);
+      return upperSubtotalLocal + bonusLocal + lowerTotalLocal;
+    };
+
     if (!isP2) {
       const score = calcFn ? calcFn(diceValues) : 0;
+      
+      // Play Yatzy sound if scored successfully
+      if (catId === 'yatzy' && score > 0) {
+        playSound('yatzy.wav');
+      }
+
       const updatedScores = { ...playerScores, [catId]: score };
       setPlayerScores(updatedScores);
       setPlayerDice(emptyDice);
@@ -173,7 +339,9 @@ export default function App() {
       if (Object.keys(updatedScores).length === totalCategoriesCount && Object.keys(opponentScores).length === totalCategoriesCount) {
         setGameOver(true);
         setTurn('player');
-        recordGameResult(grandTotal, opponentTotal);
+        const pTotalLocal = computeTotal(updatedScores);
+        const aTotalLocal = computeTotal(opponentScores);
+        recordGameResult(pTotalLocal, aTotalLocal);
       } else if (!gameOver) {
         if (gameMode === 'ai') startBotTurn();
         else {
@@ -200,12 +368,10 @@ export default function App() {
         yatzy: (d) => checkYatzy(d),
         chance: (d) => d.reduce((a, b) => a + b, 0),
       };
-      const p2Score = calcFn ? calcFn(diceValues) : calcMap[catId](diceValues);
+      const p2Score = calcFn ? calcFn(diceValues) : (calcMap[catId] ? calcMap[catId](diceValues) : 0);
       const nextOpponentScores = { ...opponentScores, [catId]: p2Score };
 
       setOpponentScores(nextOpponentScores);
-      setTurn('player');
-      setP2Message('Waiting for turn...');
       setP2Held(emptyHeld);
       setP2Dice(emptyDice);
       setP2RollsLeft(3);
@@ -213,7 +379,13 @@ export default function App() {
       if (Object.keys(playerScores).length === totalCategoriesCount && Object.keys(nextOpponentScores).length === totalCategoriesCount) {
         setGameOver(true);
         setTurn('player');
-        recordGameResult(grandTotal, Object.values(nextOpponentScores).reduce((a, b) => a + b, 0));
+        setP2Message('Game Over');
+        const pTotalLocal = computeTotal(playerScores);
+        const aTotalLocal = computeTotal(nextOpponentScores);
+        recordGameResult(pTotalLocal, aTotalLocal);
+      } else {
+        setTurn('player');
+        setP2Message('Waiting for turn...');
       }
     }
   };
@@ -276,9 +448,22 @@ export default function App() {
         setIsP2Rolling(false);
         setP2Message('AI choosing category...');
         setTimeout(() => {
-          const chosenCategory = getBestBotCategory(currentBotDice, opponentScores);
-          if (chosenCategory) triggerFlyAndScore(chosenCategory, null, true, currentBotDice);
-          else setTurn('player');
+          let chosenCategory = getBestBotCategory(currentBotDice, opponentScores);
+          
+          if (!chosenCategory || opponentScores[chosenCategory] !== undefined) {
+            const allCategories = [
+              'ones', 'twos', 'threes', 'fours', 'fives', 'sixes',
+              'threeOfAKind', 'fourOfAKind', 'fullHouse', 'smallStraight', 'largeStraight', 'yatzy', 'chance'
+            ];
+            chosenCategory = allCategories.find((cat) => opponentScores[cat] === undefined);
+          }
+
+          if (chosenCategory) {
+            triggerFlyAndScore(chosenCategory, null, true, currentBotDice);
+          } else {
+            setGameOver(true);
+            setTurn('player');
+          }
         }, 700);
         return;
       }
@@ -314,13 +499,19 @@ export default function App() {
     setGameStarted(true);
   };
 
-  // Jab user naya match dabaye aur purani game save ho, toh confirm modal khol do
   const startGameWithMode = (mode) => {
-    if (hasSavedGame) {
+    const pScores = JSON.parse(localStorage.getItem(STORAGE_KEYS.playerScores) || '{}');
+    const aScores = JSON.parse(localStorage.getItem(STORAGE_KEYS.opponentScores) || '{}');
+    const isOver = localStorage.getItem(STORAGE_KEYS.gameOver) === 'true';
+    const totalFilled = Object.keys(pScores).length + Object.keys(aScores).length;
+    const savedNow = totalFilled > 0 && !isOver;
+
+    if (savedNow) {
       setPendingMode(mode);
       setShowConfirmModal(true);
       return;
     }
+
     executeNewGame(mode);
   };
 
@@ -334,6 +525,10 @@ export default function App() {
     setPlayerScores({});
     setOpponentScores({});
     setGameOver(false);
+    setResultRecorded(false);
+    setBonusPlayed(false);
+    localStorage.removeItem(STORAGE_KEYS.bonusPlayed);
+    localStorage.removeItem(STORAGE_KEYS.resultRecorded);
     setP2Held(emptyHeld);
     setP2Dice(emptyDice);
     setP2RollsLeft(3);
@@ -348,7 +543,12 @@ export default function App() {
 
   return (
     <div className="h-screen w-screen bg-emerald-950 flex items-center justify-center p-0 font-mono select-none overflow-hidden relative">
-      {/* Custom Pyara Sa Confirm Modal */}
+      {/* Hidden DOM Audio Elements for Bulletproof Autoplay Compatibility */}
+      <audio id="sound-win" src="/win.wav" preload="auto" />
+      <audio id="sound-lose" src="/lose.wav" preload="auto" />
+      <audio id="sound-bonus" src="/bonus.wav" preload="auto" />
+      <audio id="sound-yatzy" src="/yatzy.wav" preload="auto" />
+
       {showConfirmModal && (
         <ConfirmModal
           title="Game in Progress"
@@ -356,12 +556,10 @@ export default function App() {
           confirmText="Yes"
           cancelText="No"
           onConfirm={() => {
-            // Yes dabane par purani game continue hogi
             setShowConfirmModal(false);
             setGameStarted(true);
           }}
           onCancel={() => {
-            // No / Cancel dabane par naya match start ho jaye ga
             executeNewGame(pendingMode);
           }}
         />
@@ -422,6 +620,7 @@ export default function App() {
             toggleHold={toggleHold}
             rollDice={rollDice}
             upperSubtotal={upperSubtotal}
+            onOpenStats={() => setShowStatsModal(true)}
           />
         )}
       </div>

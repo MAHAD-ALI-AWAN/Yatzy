@@ -12,6 +12,7 @@ export const STORAGE_KEYS = {
   p2Dice: 'yatzy_p2Dice',
   p2Held: 'yatzy_p2Held',
   p2RollsLeft: 'yatzy_p2RollsLeft',
+  resultRecorded: 'yatzy_resultRecorded',
 };
 
 export const clearGameState = () => {
@@ -28,5 +29,6 @@ export const clearGameState = () => {
     STORAGE_KEYS.p2Dice,
     STORAGE_KEYS.p2Held,
     STORAGE_KEYS.p2RollsLeft,
+    STORAGE_KEYS.resultRecorded,
   ].forEach((key) => localStorage.removeItem(key));
 };
